@@ -27,3 +27,14 @@ for needle in [
 ]:
     if needle not in gateway:
         raise SystemExit(f"Langfuse gateway invariant missing: {needle}")
+
+
+adapter = Path("plugin-overlays/langfuse-arcade/skills/langfuse-arcade-usage/SKILL.md").read_text(encoding="utf-8")
+for needle in [
+    "Arcade_SelectTools",
+    "Arcade_UseTool",
+    "legacy/direct connection",
+    "do not claim that the compact cutover is complete",
+]:
+    if needle not in adapter:
+        raise SystemExit(f"Langfuse adapter invariant missing: {needle}")
