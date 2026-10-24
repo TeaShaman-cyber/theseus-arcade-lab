@@ -4,4 +4,5 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 git diff --check
 python3 tools/verify_repo.py
+python3 tools/verify_plugin_overlay.py
 printf '%s\n' 'DEV_CHECK_PASS'

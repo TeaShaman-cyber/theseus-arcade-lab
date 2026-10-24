@@ -1,0 +1,19 @@
+{
+  "apps": "./.app.json",
+  "author": {
+    "name": "App developer"
+  },
+  "description": "arcade.dev",
+  "interface": {
+    "capabilities": [],
+    "category": "Other",
+    "defaultPrompt": null,
+    "developerName": "App developer",
+    "displayName": "arcade.dev",
+    "longDescription": "arcade.dev",
+    "shortDescription": "arcade.dev"
+  },
+  "name": "dev-6adbc7118d948191af9a907f79bca7a3",
+  "version": "1.0.1",
+  "skills": "./skills"
+}
