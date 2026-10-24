@@ -14,3 +14,13 @@ jobs:
         with:
           python-version: '3.11'
       - run: tools/dev/check
+      - name: Upload compact Langfuse plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: langfuse-arcade-compact
+          path: |
+            plugin-overlays/langfuse-arcade-portable/plugin.json
+            plugin-overlays/langfuse-arcade-portable/mcp.json
+            plugin-overlays/langfuse-arcade-portable/skills/**
+          if-no-files-found: error
+          retention-days: 7
