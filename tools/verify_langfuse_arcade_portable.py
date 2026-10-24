@@ -25,6 +25,7 @@ assert not (pkg / ".app.json").exists()
 
 for rel in [
     "skills/langfuse/SKILL.md",
+    "skills/langfuse/references/Langfuse-Skills-LICENSE.txt",
     "skills/migrate-to-langfuse/SKILL.md",
     "skills/langfuse-arcade-usage/SKILL.md",
     "skills/langfuse-arcade-usage/references/gateway.md",
@@ -32,6 +33,10 @@ for rel in [
 ]:
     if not (pkg / rel).is_file():
         raise SystemExit(f"missing portable plugin file: {rel}")
+
+lf_license = subprocess.check_output(["git", "hash-object", str(pkg / "skills/langfuse/references/Langfuse-Skills-LICENSE.txt")], text=True).strip()
+if lf_license != "550653a474546ca541c8b50ab3ad0b5cb5ba22a2":
+    raise SystemExit(f"Langfuse license drift: {lf_license}")
 
 lines = (pkg / "UPSTREAM.tsv").read_text(encoding="utf-8").splitlines()
 if not lines or lines[0] != "commit\t4429a94b309980e1cee2f5960c271e123347cb42":
@@ -58,6 +63,7 @@ arcade_files = {
     "upstream/try-arcade/SKILL.md": "92115cb7973cb1f28e2b1d942073c71d12798524",
     "upstream/try-arcade/references/arcade-docs.md": "a1e59b8fe55cf2587c64d7be03bf0cdbf5c01829",
     "third_party/ArcadeAI-arcade-plugin-LICENSE.txt": "ddab4af7001c3e2fdf5bfc6a538b7835b27103da",
+    "skills/try-langfuse-arcade/references/ArcadeAI-LICENSE.txt": "ddab4af7001c3e2fdf5bfc6a538b7835b27103da",
 }
 for rel, expected in arcade_files.items():
     path = pkg / rel
