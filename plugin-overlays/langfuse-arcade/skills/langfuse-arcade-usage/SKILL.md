@@ -9,6 +9,14 @@ This plugin routes `ChatGPT -> Arcade gateway -> Langfuse remote MCP -> Langfuse
 
 Use the bundled official Langfuse skills for domain workflows and best practices. This adapter owns only the ChatGPT/Arcade execution route.
 
+## Web/mobile compatibility invariant
+
+The production `langfuse-arcade` plugin is App-backed. Preserve `.app.json` / the App binding and layer skills on top of it.
+
+Do **not** add `mcp.json` or `.mcp.json` to the App-backed plugin package. A standalone package that embeds a remote MCP endpoint through those manifests is treated by the current ChatGPT host as **Desktop only**, even when the endpoint is public HTTPS.
+
+If a newly-created Langfuse plugin is marked Desktop only, check packaging first: App-backed `.app.json` is the web/mobile path; portable remote-MCP packaging is diagnostic/desktop-only.
+
 ## Canonical gateway
 
 Read `references/gateway.md` before diagnosing routing or changing the connection.
