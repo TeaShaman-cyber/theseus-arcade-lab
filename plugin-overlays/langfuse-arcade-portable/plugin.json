@@ -1,16 +1,18 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "langfuse-arcade-compact",
-  "version": "0.1.0",
-  "description": "Compact Langfuse access through the canonical Arcade gateway using Tool Recommendation.",
-  "author": {"name": "TeaShaman-cyber"},
+  "version": "0.1.1",
+  "description": "DESKTOP DIAGNOSTIC ONLY: compact Langfuse access through Arcade Tool Recommendation.",
+  "author": {
+    "name": "TeaShaman-cyber"
+  },
   "repository": "https://github.com/TeaShaman-cyber/theseus-arcade-lab",
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Langfuse Arcade Compact",
-        "shortDescription": "Compact Langfuse via Arcade",
-        "longDescription": "Use Langfuse through the canonical Arcade gateway without injecting the full Langfuse MCP tool schema into every request.",
+        "displayName": "Langfuse Arcade Diagnostic",
+        "shortDescription": "Desktop diagnostic only",
+        "longDescription": "Desktop diagnostic package for compact Langfuse access through Arcade. The production web/mobile path must remain App-backed and must not embed mcp.json.",
         "developerName": "TeaShaman-cyber",
         "category": "Developer Tools",
         "capabilities": [],

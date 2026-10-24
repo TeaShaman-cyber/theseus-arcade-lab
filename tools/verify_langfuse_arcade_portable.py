@@ -8,7 +8,13 @@ pkg = root / "plugin-overlays/langfuse-arcade-portable"
 manifest = json.loads((pkg / "plugin.json").read_text(encoding="utf-8"))
 assert manifest["$schema"] == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 assert manifest["name"] == "langfuse-arcade-compact"
-assert manifest["version"] == "0.1.0"
+assert manifest["version"] == "0.1.1"
+assert "DESKTOP DIAGNOSTIC ONLY" in manifest["description"]
+readme = (pkg / "README.md").read_text(encoding="utf-8")
+for needle in ["DESKTOP_DIAGNOSTIC_ONLY", "Desktop only", "App-backed", "NOT the production path"]:
+    if needle not in readme:
+        raise SystemExit(f"portable compatibility warning missing: {needle}")
+
 interface = manifest["extensions"]["com.openai"]["interface"]
 assert interface["category"] == "Developer Tools"
 assert len(interface["displayName"]) <= 30

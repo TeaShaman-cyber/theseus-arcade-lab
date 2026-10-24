@@ -35,6 +35,9 @@ for needle in [
     "Arcade_UseTool",
     "legacy/direct connection",
     "do not claim that the compact cutover is complete",
+    "Web/mobile compatibility invariant",
+    "Do **not** add `mcp.json` or `.mcp.json`",
+    "Desktop only",
 ]:
     if needle not in adapter:
         raise SystemExit(f"Langfuse adapter invariant missing: {needle}")
