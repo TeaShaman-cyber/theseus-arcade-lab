@@ -16,3 +16,14 @@ for name, needles in required.items():
             raise SystemExit(f"{name}: missing invariant: {needle}")
 
 print("REPO_VERIFY_PASS")
+
+
+gateway = Path("plugin-overlays/langfuse-arcade/references/gateway.md").read_text(encoding="utf-8")
+for needle in [
+    "gw_3L7MRKPtAX27M5pBEobEz54PZMs",
+    "https://api.arcade.dev/mcp/gw_3L7MRKPtAX27M5pBEobEz54PZMs",
+    "Do not append `?tool_recommendation=false`",
+    "gw_3L71MusJCi6qhXfztWzMyeYIJrp",
+]:
+    if needle not in gateway:
+        raise SystemExit(f"Langfuse gateway invariant missing: {needle}")
