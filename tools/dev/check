@@ -5,4 +5,5 @@ cd "$repo_root"
 git diff --check
 python3 tools/verify_repo.py
 python3 tools/verify_plugin_overlay.py
+python3 tools/verify_langfuse_arcade_portable.py
 printf '%s\n' 'DEV_CHECK_PASS'
