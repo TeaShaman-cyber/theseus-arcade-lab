@@ -291,13 +291,30 @@ class ServerStaticContractTests(unittest.TestCase):
         self.assertIn("authorization_origin", text)
         self.assertIn("request.base_url", text)
 
-    def test_server_keeps_exact_two_read_only_zenodo_tools(self):
+    def test_server_supports_explicit_zenodo_api_base(self):
         text = (ROOT / "server.py").read_text(encoding="utf-8")
-        self.assertEqual(text.count('@mcp.tool()'), 2)
-        self.assertIn('def list_deposits(', text)
-        self.assertIn('def get_deposit(', text)
-        self.assertNotIn('publish_deposit', text)
-        self.assertNotIn('deposit:actions', text)
+        self.assertIn('ZENODO_API_BASE', text)
+        self.assertIn('base_url=zenodo_api_base', text)
+
+    def test_server_exposes_draft_lifecycle_tools_with_risk_annotations(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        for name in [
+            'list_deposits', 'get_deposit', 'create_deposit', 'update_deposit',
+            'reserve_doi', 'get_file', 'upload_file', 'delete_file', 'delete_draft',
+            'edit_published_deposit', 'create_new_version', 'import_previous_version_files',
+        ]:
+            self.assertIn(f'def {name}(', text)
+        self.assertIn('ToolAnnotations', text)
+        self.assertIn('read_only_hint=True', text)
+        self.assertIn('destructive_hint=True', text)
+        self.assertIn('destructive_hint=False', text)
+        self.assertNotIn('def publish_deposit(', text)
+
+    def test_publication_remains_separate_from_raw_agent_tool_surface(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn('@mcp.tool()\n    async def publish_deposit', text)
+        client = (ROOT.parent.parent / 'arcade' / 'zenodo-account' / 'src' / 'theseus_zenodo_arcade' / 'zenodo.py').read_text(encoding='utf-8')
+        self.assertIn('def publish_deposit(', client)
 
 
 if __name__ == "__main__":
