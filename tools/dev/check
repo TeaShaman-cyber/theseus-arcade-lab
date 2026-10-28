@@ -6,4 +6,6 @@ git diff --check
 python3 tools/verify_repo.py
 python3 tools/verify_plugin_overlay.py
 python3 tools/verify_langfuse_arcade_portable.py
+python3 tools/verify_zenodo_arcade.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s arcade/zenodo-account/tests -v
 printf '%s\n' 'DEV_CHECK_PASS'
