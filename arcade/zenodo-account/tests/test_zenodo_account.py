@@ -76,6 +76,24 @@ class ZenodoAccountTests(unittest.TestCase):
         ):
             self.assertNotIn(secret, serialized)
 
+    def test_normalize_deposit_accepts_current_zenodo_file_list_shape(self):
+        raw = {
+            "id": 23744401,
+            "metadata": {"title": "Current Zenodo shape"},
+            "files": [
+                {
+                    "key": "theseus-mcp-canary.txt",
+                    "size": 73,
+                    "checksum": "md5:cc9911c6dd28bfd309e2218177fcb039",
+                }
+            ],
+        }
+        out = self.normalize_deposit(raw)
+        self.assertEqual(
+            out["files"],
+            [{"name": "theseus-mcp-canary.txt", "size": 73, "checksum": "md5:cc9911c6dd28bfd309e2218177fcb039"}],
+        )
+
     def test_normalize_deposit_tolerates_sparse_provider_response(self):
         self.assertEqual(
             self.normalize_deposit({"id": "draft-7"}),
