@@ -8,4 +8,5 @@ python3 tools/verify_plugin_overlay.py
 python3 tools/verify_langfuse_arcade_portable.py
 python3 tools/verify_zenodo_arcade.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s arcade/zenodo-account/tests -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s experiments/zenodo-timeweb-canary/tests -v
 printf '%s\n' 'DEV_CHECK_PASS'
