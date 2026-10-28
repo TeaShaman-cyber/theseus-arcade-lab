@@ -35,6 +35,42 @@ def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return {key: metadata[key] for key in SAFE_METADATA_KEYS if key in metadata}
 
 
+def _writable_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    result = dict(metadata)
+
+    resource_type = result.get("resource_type")
+    if isinstance(resource_type, Mapping) and "id" not in resource_type:
+        resource_id = resource_type.get("type")
+        if isinstance(resource_id, str) and resource_id:
+            result["resource_type"] = {"id": resource_id}
+
+    creators = result.get("creators")
+    if isinstance(creators, list):
+        normalized_creators = []
+        for creator in creators:
+            if not isinstance(creator, Mapping):
+                normalized_creators.append(creator)
+                continue
+            if isinstance(creator.get("person_or_org"), Mapping):
+                normalized_creators.append(dict(creator))
+                continue
+            name = creator.get("name")
+            if isinstance(name, str) and name.strip():
+                affiliations = []
+                affiliation = creator.get("affiliation")
+                if isinstance(affiliation, str) and affiliation.strip():
+                    affiliations.append({"name": affiliation.strip()})
+                normalized_creators.append({
+                    "person_or_org": {"type": "personal", "name": name.strip()},
+                    "affiliations": affiliations,
+                })
+            else:
+                normalized_creators.append(dict(creator))
+        result["creators"] = normalized_creators
+
+    return result
+
+
 def normalize_deposit(raw: Mapping[str, Any]) -> dict[str, Any]:
     """Return an allow-listed, model-visible projection of one Zenodo record/draft."""
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), Mapping) else {}
@@ -166,7 +202,8 @@ class ZenodoClient:
             if isinstance(value, Mapping):
                 writable[key] = dict(value)
         current_metadata = writable.get("metadata") if isinstance(writable.get("metadata"), dict) else {}
-        current_metadata.update(dict(metadata))
+        current_metadata = _writable_metadata(current_metadata)
+        current_metadata.update(_writable_metadata(metadata))
         writable["metadata"] = current_metadata
         payload = self._request_json(f"/records/{encoded_id}/draft", method="PUT", payload=writable)
         if not isinstance(payload, Mapping):

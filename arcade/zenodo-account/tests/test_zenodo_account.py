@@ -261,6 +261,39 @@ class LifecycleClientTests(unittest.TestCase):
         self.assertEqual(result["title"], "Updated")
         self.assertEqual(result["doi"], "10.5281/zenodo.1")
 
+    def test_update_deposit_rewrites_live_read_shapes_before_put(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        existing = {
+            "id": "draft-1",
+            "metadata": {
+                "title": "Theseus v1.0.0",
+                "resource_type": {"title": "Other", "type": "other"},
+                "creators": [{"name": "TeaShaman-cyber", "affiliation": None}],
+            },
+            "files": {"enabled": True},
+            "access": {"record": "public", "files": "public"},
+        }
+        seen = {}
+
+        def opener(request, timeout):
+            if request.get_method() == "GET":
+                return FakeResponse(existing)
+            body = json.loads(request.data.decode("utf-8"))
+            seen["body"] = body
+            return FakeResponse({"id": "draft-1", **body})
+
+        ZenodoClient("token", opener=opener).update_deposit("draft-1", {"version": "1.0.0"})
+        metadata = seen["body"]["metadata"]
+        self.assertEqual(metadata["resource_type"], {"id": "other"})
+        self.assertEqual(
+            metadata["creators"],
+            [{
+                "person_or_org": {"type": "personal", "name": "TeaShaman-cyber"},
+                "affiliations": [],
+            }],
+        )
+
     def test_reserve_doi_posts_pid_endpoint_and_reads_back_draft(self):
         from theseus_zenodo_arcade.zenodo import ZenodoClient
 
