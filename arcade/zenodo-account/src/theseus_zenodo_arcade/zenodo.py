@@ -16,6 +16,25 @@ def _file_summary(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+SAFE_METADATA_KEYS = (
+    "title",
+    "description",
+    "publication_date",
+    "resource_type",
+    "creators",
+    "contributors",
+    "version",
+    "rights",
+    "subjects",
+    "languages",
+    "publisher",
+)
+
+
+def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: metadata[key] for key in SAFE_METADATA_KEYS if key in metadata}
+
+
 def normalize_deposit(raw: Mapping[str, Any]) -> dict[str, Any]:
     """Return an allow-listed, model-visible projection of one Zenodo record/draft."""
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), Mapping) else {}
@@ -30,7 +49,7 @@ def normalize_deposit(raw: Mapping[str, Any]) -> dict[str, Any]:
     else:
         entries = []
 
-    return {
+    result = {
         "id": raw.get("id"),
         "title": metadata.get("title") or raw.get("title") or "",
         "is_published": bool(raw.get("is_published", False)),
@@ -40,6 +59,10 @@ def normalize_deposit(raw: Mapping[str, Any]) -> dict[str, Any]:
         "html_url": links.get("self_html"),
         "files": [_file_summary(item) for item in entries if isinstance(item, Mapping)],
     }
+    safe_metadata = _safe_metadata(metadata)
+    if safe_metadata:
+        result["metadata"] = safe_metadata
+    return result
 
 
 class ZenodoClient:

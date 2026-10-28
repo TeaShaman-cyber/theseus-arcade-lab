@@ -62,6 +62,30 @@ class ZenodoAccountTests(unittest.TestCase):
         self.assertNotIn("/actions/publish", serialized)
         self.assertNotIn("\"publish\"", serialized)
 
+    def test_normalize_deposit_exposes_safe_draft_metadata_for_review(self):
+        raw = {
+            "id": "draft-review",
+            "metadata": {
+                "title": "Theseus v1.0.0",
+                "description": "Accepted baseline",
+                "publication_date": "2026-09-06",
+                "resource_type": {"id": "other"},
+                "creators": [{"person_or_org": {"type": "personal", "given_name": "A", "family_name": "B"}}],
+                "version": "1.0.0",
+                "rights": [{"id": "cc-by-4.0"}],
+                "subjects": [{"subject": "Theseus"}],
+                "access_token": "must-not-leak",
+            },
+        }
+        out = self.normalize_deposit(raw)
+        self.assertEqual(out["metadata"]["description"], "Accepted baseline")
+        self.assertEqual(out["metadata"]["publication_date"], "2026-09-06")
+        self.assertEqual(out["metadata"]["resource_type"], {"id": "other"})
+        self.assertEqual(out["metadata"]["version"], "1.0.0")
+        self.assertEqual(out["metadata"]["rights"], [{"id": "cc-by-4.0"}])
+        self.assertEqual(out["metadata"]["subjects"], [{"subject": "Theseus"}])
+        self.assertNotIn("access_token", json.dumps(out, sort_keys=True))
+
     def test_normalize_deposit_never_returns_secret_values(self):
         serialized = json.dumps(self.normalize_deposit(self.raw), sort_keys=True)
         for secret in (
