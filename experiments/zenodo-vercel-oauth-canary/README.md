@@ -23,11 +23,11 @@ ChatGPT is a predefined **public OAuth client**:
 - authorization code + PKCE `S256`
 - token endpoint auth method `none`
 - no OAuth client secret
-- first-party MCP scope: `zenodo:manage`
+- first-party MCP scope: `zenodo:read` (legacy connector transport scope; not the provider-capability boundary)
 - `resource` is echoed into the token audience
 - access and refresh tokens are signed by the canary's internal signing key
 
-`zenodo:manage` is this MCP server's authorization scope. It is distinct from the Zenodo Personal Access Token provider scopes held by Vercel.
+`zenodo:read` is retained for connector-session compatibility. It is a legacy transport scope name, not a statement that the MCP surface is read-only. Provider capability comes from the Zenodo PAT; consequential authority is controlled by explicit human approval.
 
 ## Environment contract
 

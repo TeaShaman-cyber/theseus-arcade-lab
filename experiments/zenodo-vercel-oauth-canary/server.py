@@ -48,7 +48,7 @@ def load_oauth_config() -> OAuthConfig | None:
         client_id=required["OAUTH_CLIENT_ID"],
         signing_secret=required["OAUTH_SIGNING_SECRET"],
         redirect_uris=redirects,
-        scopes=("zenodo:manage", "offline_access"),
+        scopes=("zenodo:read", "offline_access"),
     )
 
 
