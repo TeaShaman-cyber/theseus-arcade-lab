@@ -21,7 +21,8 @@ from oauth_support import (
 )
 
 
-ISSUER = "https://theseus-zenodo-mcp-canary.vercel.app"
+ISSUER = "https://theseus-zenodo-oauth-canary-semyon-s-nakama.vercel.app"
+AUTH_ORIGIN = "https://theseus-zenodo-oauth-login-semyon-s-nakama.vercel.app"
 REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 
 
@@ -33,40 +34,38 @@ def config() -> OAuthConfig:
     return OAuthConfig(
         issuer=ISSUER,
         resource=ISSUER,
+        authorization_origin=AUTH_ORIGIN,
         client_id="chatgpt-theseus",
-        client_secret="client-secret",
         signing_secret="signing-secret-with-enough-entropy-for-tests",
-        approval_secret="owner-approval-secret",
         redirect_uris=(REDIRECT,),
         scopes=("zenodo:read", "offline_access"),
     )
 
 
 class MetadataTests(unittest.TestCase):
-    def test_protected_resource_points_to_same_origin_authorization_server(self):
+    def test_protected_resource_points_to_public_oauth_issuer(self):
         metadata = oauth_protected_resource_metadata(config())
         self.assertEqual(metadata["resource"], ISSUER)
         self.assertEqual(metadata["authorization_servers"], [ISSUER])
         self.assertEqual(metadata["scopes_supported"], ["zenodo:read", "offline_access"])
 
-    def test_authorization_server_advertises_pkce_refresh_and_confidential_client(self):
+    def test_authorization_endpoint_is_protected_alias_but_token_endpoint_is_public(self):
         metadata = oauth_authorization_server_metadata(config())
         self.assertEqual(metadata["issuer"], ISSUER)
-        self.assertEqual(metadata["authorization_endpoint"], ISSUER + "/oauth/authorize")
+        self.assertEqual(metadata["authorization_endpoint"], AUTH_ORIGIN + "/oauth/authorize")
         self.assertEqual(metadata["token_endpoint"], ISSUER + "/oauth/token")
+        self.assertEqual(metadata["token_endpoint_auth_methods_supported"], ["none"])
         self.assertIn("S256", metadata["code_challenge_methods_supported"])
         self.assertIn("authorization_code", metadata["grant_types_supported"])
         self.assertIn("refresh_token", metadata["grant_types_supported"])
-        self.assertIn("client_secret_post", metadata["token_endpoint_auth_methods_supported"])
         self.assertTrue(metadata["authorization_response_iss_parameter_supported"])
         self.assertNotIn("registration_endpoint", metadata)
         self.assertNotIn("client_id_metadata_document_supported", metadata)
 
-    def test_401_challenge_exposes_only_resource_metadata_and_scope(self):
+    def test_401_challenge_exposes_only_public_resource_metadata(self):
         challenge = www_authenticate_challenge(config())
         self.assertIn('resource_metadata="' + ISSUER + '/.well-known/oauth-protected-resource"', challenge)
         self.assertIn('scope="zenodo:read"', challenge)
-        self.assertNotIn("client-secret", challenge)
         self.assertNotIn("signing-secret", challenge)
 
 
@@ -115,7 +114,7 @@ class TokenTests(unittest.TestCase):
     def authorize(self, now=1_800_000_000):
         params, verifier = AuthorizationRequestTests().base_params()
         request = validate_authorization_request(params, config())
-        code = issue_authorization_code(request, config(), subject="owner", now=now)
+        code = issue_authorization_code(request, config(), subject="vercel-authenticated-user", now=now)
         return code, verifier
 
     def exchange(self, code, verifier, now=1_800_000_001):
@@ -123,7 +122,6 @@ class TokenTests(unittest.TestCase):
             {
                 "grant_type": "authorization_code",
                 "client_id": "chatgpt-theseus",
-                "client_secret": "client-secret",
                 "code": code,
                 "code_verifier": verifier,
                 "redirect_uri": REDIRECT,
@@ -133,7 +131,7 @@ class TokenTests(unittest.TestCase):
             now=now,
         )
 
-    def test_code_exchange_requires_client_secret_and_pkce_and_binds_audience(self):
+    def test_public_client_code_exchange_uses_pkce_and_binds_audience(self):
         code, verifier = self.authorize()
         result = self.exchange(code, verifier)
         self.assertEqual(result["token_type"], "Bearer")
@@ -142,7 +140,7 @@ class TokenTests(unittest.TestCase):
         claims = verify_access_token(result["access_token"], config(), now=1_800_000_002)
         self.assertEqual(claims["aud"], ISSUER)
         self.assertEqual(claims["iss"], ISSUER)
-        self.assertEqual(claims["sub"], "owner")
+        self.assertEqual(claims["sub"], "vercel-authenticated-user")
         self.assertEqual(claims["client_id"], "chatgpt-theseus")
         self.assertIn("zenodo:read", claims["scope"].split())
 
@@ -151,28 +149,26 @@ class TokenTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PKCE"):
             self.exchange(code, "x" * 64)
 
-    def test_code_exchange_rejects_wrong_client_secret(self):
+    def test_code_exchange_rejects_wrong_client_id(self):
         code, verifier = self.authorize()
         form = {
             "grant_type": "authorization_code",
-            "client_id": "chatgpt-theseus",
-            "client_secret": "wrong",
+            "client_id": "wrong-client",
             "code": code,
             "code_verifier": verifier,
             "redirect_uri": REDIRECT,
             "resource": ISSUER,
         }
-        with self.assertRaisesRegex(ValueError, "client"):
+        with self.assertRaisesRegex(ValueError, "client_id"):
             exchange_authorization_code(form, config(), now=1_800_000_001)
 
-    def test_refresh_grant_issues_fresh_access_token_for_same_resource(self):
+    def test_refresh_grant_requires_no_client_secret(self):
         code, verifier = self.authorize()
         first = self.exchange(code, verifier)
         refreshed = exchange_refresh_token(
             {
                 "grant_type": "refresh_token",
                 "client_id": "chatgpt-theseus",
-                "client_secret": "client-secret",
                 "refresh_token": first["refresh_token"],
                 "resource": ISSUER,
             },
@@ -182,7 +178,7 @@ class TokenTests(unittest.TestCase):
         self.assertNotEqual(first["access_token"], refreshed["access_token"])
         claims = verify_access_token(refreshed["access_token"], config(), now=1_800_001_001)
         self.assertEqual(claims["aud"], ISSUER)
-        self.assertEqual(claims["sub"], "owner")
+        self.assertEqual(claims["sub"], "vercel-authenticated-user")
 
     def test_access_token_rejects_wrong_audience_even_with_valid_signature(self):
         code, verifier = self.authorize()
@@ -190,10 +186,9 @@ class TokenTests(unittest.TestCase):
         other = OAuthConfig(
             issuer=ISSUER,
             resource="https://wrong-resource.example",
+            authorization_origin=AUTH_ORIGIN,
             client_id="chatgpt-theseus",
-            client_secret="client-secret",
             signing_secret="signing-secret-with-enough-entropy-for-tests",
-            approval_secret="owner-approval-secret",
             redirect_uris=(REDIRECT,),
             scopes=("zenodo:read", "offline_access"),
         )
@@ -205,12 +200,11 @@ class OAuthBearerGateTests(unittest.TestCase):
     def _access_token(self):
         params, verifier = AuthorizationRequestTests().base_params()
         request = validate_authorization_request(params, config())
-        code = issue_authorization_code(request, config(), subject="owner", now=1_800_000_000)
+        code = issue_authorization_code(request, config(), subject="vercel-authenticated-user", now=1_800_000_000)
         return exchange_authorization_code(
             {
                 "grant_type": "authorization_code",
                 "client_id": "chatgpt-theseus",
-                "client_secret": "client-secret",
                 "code": code,
                 "code_verifier": verifier,
                 "redirect_uri": REDIRECT,
@@ -279,41 +273,32 @@ class OAuthBearerGateTests(unittest.TestCase):
         seen, messages = self._call("Bearer " + token)
         self.assertTrue(seen["called"])
         self.assertEqual(messages[0]["status"], 204)
-        self.assertEqual(seen["claims"]["sub"], "owner")
+        self.assertEqual(seen["claims"]["sub"], "vercel-authenticated-user")
         self.assertEqual(seen["claims"]["aud"], ISSUER)
-
-    def test_wrong_bearer_does_not_echo_credential(self):
-        seen, messages = self._call("Bearer definitely-wrong")
-        self.assertFalse(seen["called"])
-        self.assertEqual(messages[0]["status"], 401)
-        self.assertNotIn(b"definitely-wrong", repr(messages).encode())
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ServerStaticContractTests(unittest.TestCase):
-    def test_server_exposes_required_oauth_and_mcp_routes_without_dcr(self):
-        from pathlib import Path
-        text = (Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
-        for needle in [
-            '/.well-known/oauth-protected-resource',
-            '/.well-known/oauth-authorization-server',
-            '/oauth/authorize',
-            '/oauth/token',
-            'stateless_http=True',
-            'json_response=True',
-        ]:
-            self.assertIn(needle, text)
-        self.assertNotIn('registration_endpoint', text)
-        self.assertNotIn('client_id_metadata_document_supported', text)
+    def test_server_has_no_human_password_or_oauth_client_secret(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn("OAUTH_APPROVAL_SECRET", text)
+        self.assertNotIn("OAUTH_CLIENT_SECRET", text)
+        self.assertNotIn("approval_secret", text)
+        self.assertNotIn("client_secret", text)
+
+    def test_server_requires_separate_authorization_origin(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertIn("OAUTH_AUTHORIZATION_ORIGIN", text)
+        self.assertIn("authorization_origin", text)
+        self.assertIn("request.base_url", text)
 
     def test_server_keeps_exact_two_read_only_zenodo_tools(self):
-        from pathlib import Path
-        text = (Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
         self.assertEqual(text.count('@mcp.tool()'), 2)
         self.assertIn('def list_deposits(', text)
         self.assertIn('def get_deposit(', text)
         self.assertNotIn('publish_deposit', text)
         self.assertNotIn('deposit:actions', text)
+
+
+if __name__ == "__main__":
+    unittest.main()

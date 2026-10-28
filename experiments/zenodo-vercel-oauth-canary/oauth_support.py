@@ -7,7 +7,6 @@ import time
 from dataclasses import dataclass
 from typing import Mapping
 
-
 ACCESS_TOKEN_TTL_SECONDS = 3600
 REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 AUTHORIZATION_CODE_TTL_SECONDS = 300
@@ -18,19 +17,19 @@ REQUIRED_RESOURCE_SCOPE = "zenodo:read"
 class OAuthConfig:
     issuer: str
     resource: str
+    authorization_origin: str
     client_id: str
-    client_secret: str
     signing_secret: str
-    approval_secret: str
     redirect_uris: tuple[str, ...]
     scopes: tuple[str, ...] = (REQUIRED_RESOURCE_SCOPE, "offline_access")
 
     def __post_init__(self) -> None:
-        for name in ("issuer", "resource", "client_id", "client_secret", "signing_secret", "approval_secret"):
+        for name in ("issuer", "resource", "authorization_origin", "client_id", "signing_secret"):
             if not str(getattr(self, name)).strip():
                 raise ValueError(f"{name} is required")
-        if not self.issuer.startswith("https://") or not self.resource.startswith("https://"):
-            raise ValueError("issuer and resource must use https")
+        for name in ("issuer", "resource", "authorization_origin"):
+            if not str(getattr(self, name)).startswith("https://"):
+                raise ValueError(f"{name} must use https")
         if not self.redirect_uris:
             raise ValueError("at least one redirect_uri is required")
         if REQUIRED_RESOURCE_SCOPE not in self.scopes:
@@ -48,12 +47,12 @@ def oauth_protected_resource_metadata(config: OAuthConfig) -> dict:
 def oauth_authorization_server_metadata(config: OAuthConfig) -> dict:
     return {
         "issuer": config.issuer,
-        "authorization_endpoint": config.issuer + "/oauth/authorize",
-        "token_endpoint": config.issuer + "/oauth/token",
+        "authorization_endpoint": config.authorization_origin.rstrip("/") + "/oauth/authorize",
+        "token_endpoint": config.issuer.rstrip("/") + "/oauth/token",
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": list(config.scopes),
         "authorization_response_iss_parameter_supported": True,
     }
@@ -124,7 +123,7 @@ def issue_authorization_code(request: Mapping[str, object], config: OAuthConfig,
 def exchange_authorization_code(form: Mapping[str, str], config: OAuthConfig, *, now: int | None = None) -> dict:
     if form.get("grant_type") != "authorization_code":
         raise ValueError("grant_type must be authorization_code")
-    _verify_client(form, config)
+    _verify_public_client(form, config)
     claims = _decode_signed(str(form.get("code", "")), config.signing_secret, now=now)
     if claims.get("typ") != "authorization_code":
         raise ValueError("invalid authorization code type")
@@ -144,7 +143,7 @@ def exchange_authorization_code(form: Mapping[str, str], config: OAuthConfig, *,
 def exchange_refresh_token(form: Mapping[str, str], config: OAuthConfig, *, now: int | None = None) -> dict:
     if form.get("grant_type") != "refresh_token":
         raise ValueError("grant_type must be refresh_token")
-    _verify_client(form, config)
+    _verify_public_client(form, config)
     claims = _decode_signed(str(form.get("refresh_token", "")), config.signing_secret, now=now)
     if claims.get("typ") != "refresh_token":
         raise ValueError("invalid refresh token type")
@@ -182,12 +181,7 @@ def _issue_token_response(source_claims: Mapping[str, object], config: OAuthConf
         "iat": issued,
         "nbf": issued,
     }
-    access_claims = {
-        **common,
-        "typ": "access_token",
-        "exp": issued + ACCESS_TOKEN_TTL_SECONDS,
-        "jti": secrets.token_urlsafe(18),
-    }
+    access_claims = {**common, "typ": "access_token", "exp": issued + ACCESS_TOKEN_TTL_SECONDS, "jti": secrets.token_urlsafe(18)}
     response = {
         "access_token": _encode_signed(access_claims, config.signing_secret),
         "token_type": "Bearer",
@@ -195,22 +189,14 @@ def _issue_token_response(source_claims: Mapping[str, object], config: OAuthConf
         "scope": scope,
     }
     if "offline_access" in scope.split():
-        refresh_claims = {
-            **common,
-            "typ": "refresh_token",
-            "exp": issued + REFRESH_TOKEN_TTL_SECONDS,
-            "jti": secrets.token_urlsafe(18),
-        }
+        refresh_claims = {**common, "typ": "refresh_token", "exp": issued + REFRESH_TOKEN_TTL_SECONDS, "jti": secrets.token_urlsafe(18)}
         response["refresh_token"] = _encode_signed(refresh_claims, config.signing_secret)
     return response
 
 
-def _verify_client(form: Mapping[str, str], config: OAuthConfig) -> None:
+def _verify_public_client(form: Mapping[str, str], config: OAuthConfig) -> None:
     if form.get("client_id") != config.client_id:
         raise ValueError("client_id is invalid")
-    supplied = str(form.get("client_secret", ""))
-    if not supplied or not hmac.compare_digest(supplied, config.client_secret):
-        raise ValueError("client authentication failed")
 
 
 def _verify_common_binding(claims: Mapping[str, object], config: OAuthConfig) -> None:
@@ -288,26 +274,16 @@ class OAuthBearerGate:
         if scope.get("type") != "http" or scope.get("path", "").rstrip("/") != "/mcp":
             await self._app(scope, receive, send)
             return
-
         if self._config is None:
             body = b'{"error":"not_configured"}'
-            await send({
-                "type": "http.response.start",
-                "status": 503,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode("ascii")),
-                ],
-            })
+            await send({"type": "http.response.start", "status": 503, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode("ascii"))]})
             await send({"type": "http.response.body", "body": body})
             return
-
         authorization = ""
         for key, value in scope.get("headers", []):
             if key.lower() == b"authorization":
                 authorization = value.decode("latin-1")
                 break
-
         prefix = "Bearer "
         token = authorization[len(prefix):] if authorization.startswith(prefix) else ""
         try:
@@ -316,18 +292,9 @@ class OAuthBearerGate:
             claims = verify_access_token(token, self._config, now=self._now())
         except ValueError:
             body = b'{"error":"unauthorized"}'
-            await send({
-                "type": "http.response.start",
-                "status": 401,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode("ascii")),
-                    (b"www-authenticate", www_authenticate_challenge(self._config).encode("utf-8")),
-                ],
-            })
+            await send({"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode("ascii")), (b"www-authenticate", www_authenticate_challenge(self._config).encode("utf-8"))]})
             await send({"type": "http.response.body", "body": body})
             return
-
         forwarded = dict(scope)
         forwarded["oauth_claims"] = claims
         await self._app(forwarded, receive, send)

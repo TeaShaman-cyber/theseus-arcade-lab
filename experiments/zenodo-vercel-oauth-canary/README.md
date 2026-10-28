@@ -1,55 +1,64 @@
 # Zenodo Vercel OAuth canary
 
-Issue #18 experiment: verify that the scoped Zenodo MCP and the OAuth layer required by a ChatGPT custom plugin can run on the same Vercel Hobby application without Arcade or another auth SaaS.
+Issue #18 experiment: verify that the scoped Zenodo MCP and ChatGPT OAuth layer can run on Vercel Hobby without Arcade, an external auth SaaS, a new user password, or a separate Google/GitHub OAuth application.
 
-## Surface
+## Human model
 
-- `GET /healthz`
-- `GET /.well-known/oauth-protected-resource`
-- `GET /.well-known/oauth-authorization-server`
-- `GET|POST /oauth/authorize`
-- `POST /oauth/token`
-- `POST /mcp`
+The same preview deployment is reached through two stable Vercel aliases:
 
-The OAuth path uses one predefined confidential client, authorization code + PKCE `S256`, the RFC 8707 `resource` value as the token audience, a human approval secret, access tokens, and refresh tokens. The MCP surface remains exactly two read-only tools: `list_deposits` and `get_deposit`.
+```text
+ChatGPT machine traffic -> public alias -> metadata / token / MCP
+Browser authorization   -> protected alias -> Vercel Authentication -> /oauth/authorize
+```
+
+The protected authorization alias relies on the user's existing Vercel session. In the current Hobby team there is exactly one confirmed member, the owner, so successful Vercel Authentication is sufficient for this single-user canary. If team membership expands, replace this singleton invariant with explicit Vercel Passport identity verification.
+
+No `OAUTH_APPROVAL_SECRET` exists. The user does not create or remember another password.
+
+## OAuth client model
+
+ChatGPT is a predefined **public OAuth client**:
+
+- `client_id = chatgpt-theseus`
+- authorization code + PKCE `S256`
+- token endpoint auth method `none`
+- no OAuth client secret
+- `resource` is echoed into the token audience
+- access and refresh tokens are signed by the canary's internal signing key
 
 ## Environment contract
 
-Required for OAuth:
+Required:
 
-- `OAUTH_ISSUER`
-- `OAUTH_RESOURCE` (defaults to the issuer)
+- `OAUTH_ISSUER` — public OAuth/MCP alias
+- `OAUTH_RESOURCE` — normally the same public alias
+- `OAUTH_AUTHORIZATION_ORIGIN` — separate Vercel-protected alias
 - `OAUTH_CLIENT_ID`
-- `OAUTH_CLIENT_SECRET`
 - `OAUTH_SIGNING_SECRET`
-- `OAUTH_APPROVAL_SECRET`
-- `OAUTH_REDIRECT_URIS` (comma-separated; defaults to ChatGPT's stable connector redirect)
-
-Provider access remains separate:
-
+- `OAUTH_REDIRECT_URIS`
 - `ZENODO_ACCESS_TOKEN`
 
-Do not commit any of these values. Automated and hosted canaries use synthetic values only.
+The signing key is infrastructure state, not a user login credential.
 
-## Current verification status
+## Routes
 
-Verified on 2026-10-28 against a protected Vercel Hobby preview:
+Public alias:
+- `GET /.well-known/oauth-protected-resource`
+- `GET /.well-known/oauth-authorization-server`
+- `POST /oauth/token`
+- `POST /mcp`
 
-- OAuth protected-resource discovery;
-- OAuth authorization-server discovery;
-- human authorization page;
-- authorization-code exchange with PKCE `S256`;
-- refresh-token exchange;
-- MCP `401` discovery challenge without an access token;
-- MCP `initialize` and `tools/list` with the issued access token;
-- exact tools `list_deposits,get_deposit`.
+The code also exposes `/oauth/authorize`, but it refuses to issue a code unless the request origin exactly matches `OAUTH_AUTHORIZATION_ORIGIN`. This prevents the public alias from bypassing the Vercel human-authentication gate.
 
-Marker: `LIVE_OAUTH_MCP_PASS`.
+Protected authorization alias:
+- `GET /oauth/authorize`
 
-## Known gap before production-grade OAuth
+Vercel Authentication runs before the application sees the request.
 
-The canary keeps authorization codes stateless. They expire after five minutes and are bound to client ID, exact redirect URI, resource, and PKCE challenge, but a successfully redeemed code is not durably marked as consumed. OAuth requires authorization codes to be single-use.
+## Known gaps before production-grade OAuth
 
-Do not describe this canary as fully OAuth-conformant until a durable one-time redemption mechanism is added and verified. Vercel Runtime Cache is not an acceptable substitute because it is ephemeral and regional.
+1. Authorization codes are stateless and expire after five minutes but are not durably marked as consumed after redemption. OAuth requires single-use authorization codes.
+2. The signing key must eventually become stable durable infrastructure state so refresh tokens survive redeploys.
+3. Final ChatGPT UI connection remains the integration witness.
 
-The final ChatGPT custom-plugin connection remains a separate human/UI integration witness.
+Do not describe the canary as fully OAuth-conformant until the single-use-code gap is resolved.
