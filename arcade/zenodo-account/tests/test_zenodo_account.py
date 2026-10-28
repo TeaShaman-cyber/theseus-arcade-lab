@@ -100,6 +100,27 @@ class ZenodoAccountTests(unittest.TestCase):
         ):
             self.assertNotIn(secret, serialized)
 
+    def test_normalize_deposit_accepts_current_inveniordm_file_entry_map(self):
+        raw = {
+            "id": "draft-files",
+            "metadata": {"title": "Draft"},
+            "files": {
+                "enabled": True,
+                "entries": {
+                    "artifact.tar.gz": {
+                        "key": "artifact.tar.gz",
+                        "size": 48835,
+                        "checksum": "md5:abc",
+                    }
+                },
+            },
+        }
+        out = self.normalize_deposit(raw)
+        self.assertEqual(
+            out["files"],
+            [{"name": "artifact.tar.gz", "size": 48835, "checksum": "md5:abc"}],
+        )
+
     def test_normalize_deposit_accepts_current_zenodo_file_list_shape(self):
         raw = {
             "id": 23744401,

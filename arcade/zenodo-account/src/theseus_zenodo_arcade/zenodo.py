@@ -79,7 +79,13 @@ def normalize_deposit(raw: Mapping[str, Any]) -> dict[str, Any]:
     doi_info = pids.get("doi") if isinstance(pids.get("doi"), Mapping) else {}
     files_raw = raw.get("files")
     if isinstance(files_raw, Mapping):
-        entries = files_raw.get("entries") if isinstance(files_raw.get("entries"), list) else []
+        raw_entries = files_raw.get("entries")
+        if isinstance(raw_entries, list):
+            entries = raw_entries
+        elif isinstance(raw_entries, Mapping):
+            entries = list(raw_entries.values())
+        else:
+            entries = []
     elif isinstance(files_raw, list):
         entries = files_raw
     else:
