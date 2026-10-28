@@ -123,6 +123,7 @@ async def token(request: Request):
 def build_app():
     oauth_config = load_oauth_config()
     zenodo_token = _optional("ZENODO_ACCESS_TOKEN")
+    zenodo_api_base = _optional("ZENODO_API_BASE") or "https://zenodo.org/api"
     mcp = MCPServer("theseus-zenodo-vercel-oauth")
 
     read_hint = ToolAnnotations(
@@ -151,7 +152,10 @@ def build_app():
     )
 
     def zenodo() -> ZenodoClient:
-        return ZenodoClient(_required("ZENODO_ACCESS_TOKEN") if not zenodo_token else zenodo_token)
+        return ZenodoClient(
+            _required("ZENODO_ACCESS_TOKEN") if not zenodo_token else zenodo_token,
+            base_url=zenodo_api_base,
+        )
 
     @mcp.tool(annotations=read_hint)
     async def list_deposits() -> list[dict[str, Any]]:

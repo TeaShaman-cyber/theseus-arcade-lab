@@ -291,6 +291,11 @@ class ServerStaticContractTests(unittest.TestCase):
         self.assertIn("authorization_origin", text)
         self.assertIn("request.base_url", text)
 
+    def test_server_supports_explicit_zenodo_api_base(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertIn('ZENODO_API_BASE', text)
+        self.assertIn('base_url=zenodo_api_base', text)
+
     def test_server_exposes_draft_lifecycle_tools_with_risk_annotations(self):
         text = (ROOT / "server.py").read_text(encoding="utf-8")
         for name in [
