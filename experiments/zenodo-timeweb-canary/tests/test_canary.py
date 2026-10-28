@@ -52,6 +52,27 @@ class BearerGateTests(unittest.TestCase):
         asyncio.run(gate(scope, receive, send))
         return seen, messages
 
+    def test_unconfigured_ingress_returns_503_without_calling_mcp(self):
+        mod = load_support()
+        seen = {"called": False}
+
+        async def inner(scope, receive, send):
+            seen["called"] = True
+
+        gate = mod.BearerGate(inner, "")
+        messages = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(gate({"type": "http", "path": "/mcp", "headers": []}, receive, send))
+        self.assertFalse(seen["called"])
+        self.assertEqual(messages[0]["status"], 503)
+        self.assertIn(b"not_configured", messages[1]["body"])
+
     def test_rejects_missing_bearer_without_calling_mcp(self):
         seen, messages = self._call(None)
         self.assertFalse(seen["called"])
@@ -111,8 +132,9 @@ class StaticContractTests(unittest.TestCase):
 
     def test_secrets_are_environment_contracts_only(self):
         text = SERVER.read_text(encoding="utf-8")
+        self.assertIn('read_optional_secret("ZENODO_ACCESS_TOKEN"', text)
         self.assertIn('resolve_secret("ZENODO_ACCESS_TOKEN"', text)
-        self.assertIn('resolve_secret("MCP_INGRESS_TOKEN"', text)
+        self.assertIn('read_optional_secret("MCP_INGRESS_TOKEN"', text)
         self.assertNotIn("personal_access_token=", text)
 
 
