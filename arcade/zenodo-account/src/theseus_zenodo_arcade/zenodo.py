@@ -135,7 +135,7 @@ class ZenodoClient:
             data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self._access_token}",
-            "Accept": "application/json",
+            "Accept": "application/vnd.inveniordm.v1+json",
         }
         if data is not None:
             headers["Content-Type"] = content_type

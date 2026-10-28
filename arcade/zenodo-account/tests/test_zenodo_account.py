@@ -229,6 +229,18 @@ class LifecycleClientTests(unittest.TestCase):
         self.assertEqual(seen["body"]["files"], {"enabled": True})
         self.assertEqual(result["id"], "draft-new")
 
+    def test_client_requests_current_inveniordm_representation(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        seen = {}
+
+        def opener(request, timeout):
+            seen["accept"] = request.get_header("Accept")
+            return FakeResponse({"id": "draft-accept", "metadata": {"title": "Draft"}})
+
+        ZenodoClient("token", opener=opener).get_deposit("draft-accept")
+        self.assertEqual(seen["accept"], "application/vnd.inveniordm.v1+json")
+
     def test_update_deposit_preserves_existing_pids_and_writable_state(self):
         from theseus_zenodo_arcade.zenodo import ZenodoClient
 
