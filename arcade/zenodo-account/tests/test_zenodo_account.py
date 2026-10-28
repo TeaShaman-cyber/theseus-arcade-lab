@@ -163,3 +163,138 @@ class ServerContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LifecycleClientTests(unittest.TestCase):
+    def test_create_deposit_posts_current_api_draft_payload(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            seen["method"] = request.get_method()
+            seen["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse({"id": "draft-new", "metadata": seen["body"]["metadata"], "files": {"enabled": True, "entries": []}})
+
+        result = ZenodoClient("token", opener=opener).create_deposit(
+            {"title": "Canary draft", "resource_type": {"id": "other"}},
+            files_enabled=True,
+        )
+        self.assertEqual(seen["url"], "https://zenodo.org/api/records")
+        self.assertEqual(seen["method"], "POST")
+        self.assertEqual(seen["body"]["metadata"]["title"], "Canary draft")
+        self.assertEqual(seen["body"]["files"], {"enabled": True})
+        self.assertEqual(result["id"], "draft-new")
+
+    def test_update_deposit_preserves_existing_pids_and_writable_state(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        calls = []
+        existing = {
+            "id": "draft-1",
+            "metadata": {"title": "Old", "description": "Keep"},
+            "files": {"enabled": True},
+            "access": {"record": "public", "files": "public"},
+            "pids": {"doi": {"identifier": "10.5281/zenodo.1", "provider": "datacite"}},
+            "custom_fields": {"journal:journal": {"title": "Example"}},
+        }
+
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method(), request.data))
+            if len(calls) == 1:
+                return FakeResponse(existing)
+            body = json.loads(request.data.decode("utf-8"))
+            self.assertEqual(body["pids"], existing["pids"])
+            self.assertEqual(body["access"], existing["access"])
+            self.assertEqual(body["files"], existing["files"])
+            self.assertEqual(body["custom_fields"], existing["custom_fields"])
+            self.assertEqual(body["metadata"]["title"], "Updated")
+            self.assertEqual(body["metadata"]["description"], "Keep")
+            return FakeResponse({**existing, **body})
+
+        result = ZenodoClient("token", opener=opener).update_deposit("draft-1", {"title": "Updated"})
+        self.assertEqual(calls[0][:2], ("https://zenodo.org/api/records/draft-1/draft", "GET"))
+        self.assertEqual(calls[1][:2], ("https://zenodo.org/api/records/draft-1/draft", "PUT"))
+        self.assertEqual(result["title"], "Updated")
+        self.assertEqual(result["doi"], "10.5281/zenodo.1")
+
+    def test_reserve_doi_posts_pid_endpoint_and_reads_back_draft(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        calls = []
+
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method()))
+            if len(calls) == 1:
+                return FakeResponse({"id": "doi"})
+            return FakeResponse({"id": "draft-2", "metadata": {"title": "DOI draft"}, "pids": {"doi": {"identifier": "10.5281/zenodo.2"}}})
+
+        result = ZenodoClient("token", opener=opener).reserve_doi("draft-2")
+        self.assertEqual(calls[0], ("https://zenodo.org/api/records/draft-2/draft/pids/doi", "POST"))
+        self.assertEqual(calls[1], ("https://zenodo.org/api/records/draft-2/draft", "GET"))
+        self.assertEqual(result["doi"], "10.5281/zenodo.2")
+
+    def test_upload_file_initializes_puts_content_commits_and_returns_file_metadata(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        calls = []
+
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method(), request.data, request.get_header("Content-type")))
+            if len(calls) == 1:
+                self.assertEqual(json.loads(request.data.decode("utf-8")), [{"key": "artifact.txt"}])
+                return FakeResponse({"entries": [{"key": "artifact.txt", "status": "pending"}]})
+            if len(calls) == 2:
+                self.assertEqual(request.data, b"hello")
+                return FakeResponse({"key": "artifact.txt", "status": "pending"})
+            if len(calls) == 3:
+                return FakeResponse({"key": "artifact.txt", "size": 5, "checksum": "md5:5d41402abc4b2a76b9719d911017c592"})
+            return FakeResponse({"key": "artifact.txt", "size": 5, "checksum": "md5:5d41402abc4b2a76b9719d911017c592"})
+
+        result = ZenodoClient("token", opener=opener).upload_file("draft-3", "artifact.txt", b"hello")
+        self.assertEqual(calls[0][:2], ("https://zenodo.org/api/records/draft-3/draft/files", "POST"))
+        self.assertEqual(calls[1][:2], ("https://zenodo.org/api/records/draft-3/draft/files/artifact.txt/content", "PUT"))
+        self.assertEqual(calls[2][:2], ("https://zenodo.org/api/records/draft-3/draft/files/artifact.txt/commit", "POST"))
+        self.assertEqual(calls[3][:2], ("https://zenodo.org/api/records/draft-3/draft/files/artifact.txt", "GET"))
+        self.assertEqual(result["name"], "artifact.txt")
+        self.assertEqual(result["size"], 5)
+
+    def test_delete_file_and_delete_draft_use_exact_destructive_routes(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        calls = []
+
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method()))
+            return FakeResponse({})
+
+        client = ZenodoClient("token", opener=opener)
+        self.assertEqual(client.delete_file("draft-4", "a b.txt"), {"deleted": True, "deposition_id": "draft-4", "file": "a b.txt"})
+        self.assertEqual(client.delete_draft("draft-4"), {"deleted": True, "deposition_id": "draft-4"})
+        self.assertEqual(calls[0], ("https://zenodo.org/api/records/draft-4/draft/files/a%20b.txt", "DELETE"))
+        self.assertEqual(calls[1], ("https://zenodo.org/api/records/draft-4/draft", "DELETE"))
+
+    def test_edit_new_version_import_and_publish_primitives_use_current_routes(self):
+        from theseus_zenodo_arcade.zenodo import ZenodoClient
+
+        calls = []
+
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method()))
+            return FakeResponse({"id": "next-draft", "metadata": {"title": "Version"}})
+
+        client = ZenodoClient("token", opener=opener)
+        client.edit_published_deposit("published-1")
+        client.create_new_version("published-1")
+        client.import_previous_version_files("next-draft")
+        client.publish_deposit("next-draft")
+        self.assertEqual(
+            calls,
+            [
+                ("https://zenodo.org/api/records/published-1/draft", "POST"),
+                ("https://zenodo.org/api/records/published-1/versions", "POST"),
+                ("https://zenodo.org/api/records/next-draft/draft/actions/files-import", "POST"),
+                ("https://zenodo.org/api/records/next-draft/draft/actions/publish", "POST"),
+            ],
+        )

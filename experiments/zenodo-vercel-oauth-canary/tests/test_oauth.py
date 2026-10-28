@@ -38,7 +38,7 @@ def config() -> OAuthConfig:
         client_id="chatgpt-theseus",
         signing_secret="signing-secret-with-enough-entropy-for-tests",
         redirect_uris=(REDIRECT,),
-        scopes=("zenodo:read", "offline_access"),
+        scopes=("zenodo:manage", "offline_access"),
     )
 
 
@@ -47,7 +47,7 @@ class MetadataTests(unittest.TestCase):
         metadata = oauth_protected_resource_metadata(config())
         self.assertEqual(metadata["resource"], ISSUER)
         self.assertEqual(metadata["authorization_servers"], [ISSUER])
-        self.assertEqual(metadata["scopes_supported"], ["zenodo:read", "offline_access"])
+        self.assertEqual(metadata["scopes_supported"], ["zenodo:manage", "offline_access"])
 
     def test_authorization_endpoint_is_protected_alias_but_token_endpoint_is_public(self):
         metadata = oauth_authorization_server_metadata(config())
@@ -65,7 +65,7 @@ class MetadataTests(unittest.TestCase):
     def test_401_challenge_exposes_only_public_resource_metadata(self):
         challenge = www_authenticate_challenge(config())
         self.assertIn('resource_metadata="' + ISSUER + '/.well-known/oauth-protected-resource"', challenge)
-        self.assertIn('scope="zenodo:read"', challenge)
+        self.assertIn('scope="zenodo:manage"', challenge)
         self.assertNotIn("signing-secret", challenge)
 
 
@@ -77,7 +77,7 @@ class AuthorizationRequestTests(unittest.TestCase):
             "client_id": "chatgpt-theseus",
             "redirect_uri": REDIRECT,
             "resource": ISSUER,
-            "scope": "zenodo:read offline_access",
+            "scope": "zenodo:manage offline_access",
             "state": "opaque-state",
             "code_challenge_method": "S256",
             "code_challenge": challenge_for(verifier),
@@ -89,7 +89,7 @@ class AuthorizationRequestTests(unittest.TestCase):
         self.assertEqual(request["client_id"], "chatgpt-theseus")
         self.assertEqual(request["resource"], ISSUER)
         self.assertEqual(request["redirect_uri"], REDIRECT)
-        self.assertEqual(request["scopes"], ("zenodo:read", "offline_access"))
+        self.assertEqual(request["scopes"], ("zenodo:manage", "offline_access"))
 
     def test_rejects_redirect_uri_not_on_exact_allowlist(self):
         params, _ = self.base_params()
@@ -142,7 +142,7 @@ class TokenTests(unittest.TestCase):
         self.assertEqual(claims["iss"], ISSUER)
         self.assertEqual(claims["sub"], "vercel-authenticated-user")
         self.assertEqual(claims["client_id"], "chatgpt-theseus")
-        self.assertIn("zenodo:read", claims["scope"].split())
+        self.assertIn("zenodo:manage", claims["scope"].split())
 
     def test_code_exchange_rejects_wrong_pkce_verifier(self):
         code, _ = self.authorize()
@@ -190,7 +190,7 @@ class TokenTests(unittest.TestCase):
             client_id="chatgpt-theseus",
             signing_secret="signing-secret-with-enough-entropy-for-tests",
             redirect_uris=(REDIRECT,),
-            scopes=("zenodo:read", "offline_access"),
+            scopes=("zenodo:manage", "offline_access"),
         )
         with self.assertRaisesRegex(ValueError, "audience"):
             verify_access_token(result["access_token"], other, now=1_800_000_002)
@@ -266,7 +266,7 @@ class OAuthBearerGateTests(unittest.TestCase):
         headers = dict(messages[0]["headers"])
         challenge = headers[b"www-authenticate"].decode()
         self.assertIn('/.well-known/oauth-protected-resource', challenge)
-        self.assertIn('scope="zenodo:read"', challenge)
+        self.assertIn('scope="zenodo:manage"', challenge)
 
     def test_valid_access_token_reaches_mcp_with_verified_claims(self):
         token = self._access_token()
@@ -291,13 +291,25 @@ class ServerStaticContractTests(unittest.TestCase):
         self.assertIn("authorization_origin", text)
         self.assertIn("request.base_url", text)
 
-    def test_server_keeps_exact_two_read_only_zenodo_tools(self):
+    def test_server_exposes_draft_lifecycle_tools_with_risk_annotations(self):
         text = (ROOT / "server.py").read_text(encoding="utf-8")
-        self.assertEqual(text.count('@mcp.tool()'), 2)
-        self.assertIn('def list_deposits(', text)
-        self.assertIn('def get_deposit(', text)
-        self.assertNotIn('publish_deposit', text)
-        self.assertNotIn('deposit:actions', text)
+        for name in [
+            'list_deposits', 'get_deposit', 'create_deposit', 'update_deposit',
+            'reserve_doi', 'get_file', 'upload_file', 'delete_file', 'delete_draft',
+            'edit_published_deposit', 'create_new_version', 'import_previous_version_files',
+        ]:
+            self.assertIn(f'def {name}(', text)
+        self.assertIn('ToolAnnotations', text)
+        self.assertIn('read_only_hint=True', text)
+        self.assertIn('destructive_hint=True', text)
+        self.assertIn('destructive_hint=False', text)
+        self.assertNotIn('def publish_deposit(', text)
+
+    def test_publication_remains_separate_from_raw_agent_tool_surface(self):
+        text = (ROOT / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn('@mcp.tool()\n    async def publish_deposit', text)
+        client = (ROOT.parent.parent / 'arcade' / 'zenodo-account' / 'src' / 'theseus_zenodo_arcade' / 'zenodo.py').read_text(encoding='utf-8')
+        self.assertIn('def publish_deposit(', client)
 
 
 if __name__ == "__main__":

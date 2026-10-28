@@ -1,6 +1,6 @@
 # Zenodo Vercel OAuth canary
 
-Issue #18 experiment: verify that the scoped Zenodo MCP and ChatGPT OAuth layer can run on Vercel Hobby without Arcade, an external auth SaaS, a new user password, or a separate Google/GitHub OAuth application.
+Issues #18 and #20: verify that the scoped Zenodo MCP and ChatGPT OAuth layer can run on Vercel Hobby without Arcade, an external auth SaaS, a new user password, or a separate Google/GitHub OAuth application, then expand the verified transport into a thin Zenodo draft-lifecycle shim.
 
 ## Human model
 
@@ -23,8 +23,11 @@ ChatGPT is a predefined **public OAuth client**:
 - authorization code + PKCE `S256`
 - token endpoint auth method `none`
 - no OAuth client secret
+- first-party MCP scope: `zenodo:manage`
 - `resource` is echoed into the token audience
 - access and refresh tokens are signed by the canary's internal signing key
+
+`zenodo:manage` is this MCP server's authorization scope. It is distinct from the Zenodo Personal Access Token provider scopes held by Vercel.
 
 ## Environment contract
 
@@ -39,6 +42,45 @@ Required:
 - `ZENODO_ACCESS_TOKEN`
 
 The signing key is infrastructure state, not a user login credential.
+
+## MCP surface
+
+Read-only:
+- `list_deposits`
+- `get_deposit`
+- `get_file`
+
+Routine draft/version writes:
+- `create_deposit`
+- `update_deposit`
+- `reserve_doi`
+- `edit_published_deposit`
+- `create_new_version`
+- `import_previous_version_files`
+
+Potentially destructive writes:
+- `upload_file` — same-name replacement may destroy prior draft content
+- `delete_file`
+- `delete_draft`
+
+All tools carry MCP `ToolAnnotations` describing read-only/write/destructive/idempotency properties. These annotations are advisory metadata, not a security mechanism; consequential/destructive calls still require explicit human approval in the controlling ChatGPT workflow.
+
+### Publication boundary
+
+The low-level Zenodo client contains the provider publish primitive, but **there is no raw agent-facing `publish_deposit(id)` MCP tool**.
+
+Publication remains a separate GitHub-governed promotion workflow owned by `TeaShaman-cyber/theseus-research#96`:
+
+```text
+accepted GitHub artifact/release + exact provenance
+  -> metadata/artifact verification
+  -> explicit human approval
+  -> provider publish primitive
+  -> Zenodo DOI/record/file readback
+  -> durable receipt back into GitHub
+```
+
+This keeps provider capability available without allowing a context-free deposition ID to bypass repository authority.
 
 ## Routes
 
@@ -59,6 +101,5 @@ Vercel Authentication runs before the application sees the request.
 
 1. Authorization codes are stateless and expire after five minutes but are not durably marked as consumed after redemption. OAuth requires single-use authorization codes.
 2. The signing key must eventually become stable durable infrastructure state so refresh tokens survive redeploys.
-3. Final ChatGPT UI connection remains the integration witness.
 
 Do not describe the canary as fully OAuth-conformant until the single-use-code gap is resolved.

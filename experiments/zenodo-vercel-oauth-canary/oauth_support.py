@@ -10,7 +10,7 @@ from typing import Mapping
 ACCESS_TOKEN_TTL_SECONDS = 3600
 REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 AUTHORIZATION_CODE_TTL_SECONDS = 300
-REQUIRED_RESOURCE_SCOPE = "zenodo:read"
+REQUIRED_RESOURCE_SCOPE = "zenodo:manage"
 
 
 @dataclass(frozen=True)
