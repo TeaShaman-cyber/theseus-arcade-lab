@@ -25,14 +25,13 @@ def wait_for_health() -> None:
             with urllib.request.urlopen(f"{BASE_URL}/healthz", timeout=1) as response:
                 payload = json.loads(response.read().decode("utf-8"))
                 if response.status == 200 and payload == {"status": "ok"}:
-                    print("TIMEWEB_CANARY_HEALTH_PASS")
                     return
         except Exception:
             time.sleep(0.2)
     raise RuntimeError("Timeweb canary health endpoint never became ready")
 
 
-def verify_unauthorized_boundary() -> None:
+def post_mcp_status() -> tuple[int, str]:
     request = urllib.request.Request(
         f"{BASE_URL}/mcp",
         data=b"{}",
@@ -40,16 +39,66 @@ def verify_unauthorized_boundary() -> None:
         method="POST",
     )
     try:
-        urllib.request.urlopen(request, timeout=5)
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
-        if exc.code == 401:
-            body = exc.read().decode("utf-8")
-            if "synthetic-ingress-token" in body:
-                raise RuntimeError("Ingress token leaked in unauthorized response")
-            print("TIMEWEB_CANARY_UNAUTH_PASS")
-            return
-        raise
-    raise RuntimeError("Unauthenticated MCP request was accepted")
+        return exc.code, exc.read().decode("utf-8")
+
+
+def start_server(env: dict[str, str]) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "server:app",
+            "--app-dir",
+            str(CANARY),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8765",
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+def stop_server(proc: subprocess.Popen[str]) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+    if proc.returncode not in (0, -15) and proc.stdout:
+        print(proc.stdout.read(), file=sys.stderr)
+
+
+def verify_unconfigured_startup(base_env: dict[str, str]) -> None:
+    env = base_env.copy()
+    env.pop("ZENODO_ACCESS_TOKEN", None)
+    env.pop("MCP_INGRESS_TOKEN", None)
+    proc = start_server(env)
+    try:
+        wait_for_health()
+        status, body = post_mcp_status()
+        if status != 503 or "not_configured" not in body:
+            raise RuntimeError(f"Unconfigured MCP boundary mismatch: {status} {body}")
+        print("TIMEWEB_CANARY_UNCONFIGURED_PASS")
+    finally:
+        stop_server(proc)
+
+
+def verify_unauthorized_boundary() -> None:
+    status, body = post_mcp_status()
+    if status != 401:
+        raise RuntimeError(f"Unauthenticated MCP request status was {status}")
+    if INGRESS_TOKEN in body:
+        raise RuntimeError("Ingress token leaked in unauthorized response")
+    print("TIMEWEB_CANARY_UNAUTH_PASS")
 
 
 async def verify_mcp_tools() -> None:
@@ -69,50 +118,28 @@ async def verify_mcp_tools() -> None:
     if names != ["list_deposits", "get_deposit"]:
         raise RuntimeError(f"Unexpected Timeweb canary tool surface: {names}")
     print("TIMEWEB_CANARY_TOOLS=" + ",".join(names))
-    print("TIMEWEB_ZENODO_HTTP_SMOKE_PASS")
 
 
 def main() -> None:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(ZENODO_SRC), str(CANARY), env.get("PYTHONPATH", "")]
+    base_env = os.environ.copy()
+    base_env["PYTHONPATH"] = os.pathsep.join(
+        [str(ZENODO_SRC), str(CANARY), base_env.get("PYTHONPATH", "")]
     )
+
+    verify_unconfigured_startup(base_env)
+
+    env = base_env.copy()
     env["ZENODO_ACCESS_TOKEN"] = "synthetic-zenodo-token"
     env["MCP_INGRESS_TOKEN"] = INGRESS_TOKEN
-
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "server:app",
-            "--app-dir",
-            str(CANARY),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8765",
-        ],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-
+    proc = start_server(env)
     try:
         wait_for_health()
+        print("TIMEWEB_CANARY_HEALTH_PASS")
         verify_unauthorized_boundary()
         asyncio.run(verify_mcp_tools())
+        print("TIMEWEB_ZENODO_HTTP_SMOKE_PASS")
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-
-        if proc.returncode not in (0, -15) and proc.stdout:
-            print(proc.stdout.read(), file=sys.stderr)
+        stop_server(proc)
 
 
 if __name__ == "__main__":
